@@ -1,0 +1,24 @@
+{
+	"Databases":[
+		{
+			"Host": "localhost",
+			"Port": 5432,
+			"Login": "inge",
+			"Password": "inge",
+			"DatabaseName": "test1"
+		},
+	
+		{
+			"Host": "localhost",
+			"Port": 5432,
+			"Login": "inge",
+			"Password": "inge",
+			"DatabaseName": "test2"
+		}
+	],
+	
+	"FieldToCompare": [
+		{"Field1": "Person.Person.firstname", "Field2": "people.firstname"},
+		{"Field1": "", "Field2": ""}
+	]
+}
