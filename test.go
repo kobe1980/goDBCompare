@@ -27,6 +27,71 @@ func getMD5Result(r *sql.Rows) [16]byte {
 	return md5.Sum([]byte(result))
 }
 
+func getMD5FromRequest(field string, db *sql.DB) (res [16]byte, error bool) {
+	var md5Field [16]byte
+	var lastPoint = strings.LastIndex(field, ".")
+	if lastPoint > 0 {
+		var tablename = field[0:lastPoint]
+		fmt.Println("tablename=" + tablename)
+		var query = "select " + field + ", count(*) from " + tablename + " group by " + field + " order by " + field
+		fmt.Println("Exec request: " + query)
+		rows, err := db.Query(query)
+		if err != nil {
+			fmt.Println("Error while executing request: " + query)
+			return md5Field, true
+		}
+		defer rows.Close()
+		md5Field = getMD5Result(rows)
+		fmt.Printf("md5 of result: %x \n", md5Field)
+		return md5Field, false
+	} else {
+		return md5Field, true
+	}
+}
+
+func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan bool) {
+	var md5Field1 [16]byte
+	var md5Field2 [16]byte
+	if field1 == "" || field2 == "" {
+		c <- false
+		return
+	} else {
+		var error bool
+		md5Field1, error = getMD5FromRequest(field1, db1)
+		if error {
+			c <- false
+			return
+		}
+		md5Field2, error = getMD5FromRequest(field2, db2)
+		if error {
+			c <- false
+			return
+		}
+	}
+
+	if md5Field1 == md5Field2 {
+		fmt.Println(field1 + " correctly exported. No difference detected")
+	} else {
+		fmt.Println(field1 + " uncorrectly exported. Differences detected")
+	}
+	c <- true
+}
+
+func createDBConnection(drivername string, user string, password string, databasename string, host string, portnumber string) (*sql.DB, error) {
+	db, err := sql.Open(drivername, "user="+user+" password="+password+" dbname="+databasename+" host="+host+" port="+portnumber)
+	if err != nil {
+		fmt.Println("Error while validating arguments of the connection to the first database. Err=" + err.Error())
+		return nil, err
+	}
+	// Open may just validate its arguments without creating a connection to the database. To verify that the data source name is valid, call Ping
+	err = db.Ping()
+	if err != nil {
+		fmt.Println("Error while testing connection to the first database. Err=" + err.Error())
+		return nil, err
+	}
+	return db, err
+}
+
 func main() {
 	fmt.Println("Hello World!")
 	fmt.Println("Config file = " + configFile)
@@ -65,18 +130,16 @@ func main() {
 
 	// Open connexion to DB 1
 	portNumber := strconv.Itoa(json_config.Databases[0].Port)
-	db1, err := sql.Open("postgres", "user="+json_config.Databases[0].Login+" password="+json_config.Databases[0].Password+" dbname="+json_config.Databases[0].DatabaseName+" host="+json_config.Databases[0].Host+" port="+portNumber)
+	db1, err := createDBConnection("postgres", json_config.Databases[0].Login, json_config.Databases[0].Password, json_config.Databases[0].DatabaseName, json_config.Databases[0].Host, portNumber)
 	if err != nil {
-		fmt.Println("Error while connecting to the first database. Err=" + err.Error())
 		os.Exit(0)
 	}
 	defer db1.Close()
 
 	// Open connexion to DB 2
 	portNumber = strconv.Itoa(json_config.Databases[1].Port)
-	db2, err := sql.Open("postgres", "user="+json_config.Databases[1].Login+" password="+json_config.Databases[1].Password+" dbname="+json_config.Databases[1].DatabaseName+" host="+json_config.Databases[1].Host+" port="+portNumber)
+	db2, err := createDBConnection("postgres", json_config.Databases[1].Login, json_config.Databases[1].Password, json_config.Databases[1].DatabaseName, json_config.Databases[1].Host, portNumber)
 	if err != nil {
-		fmt.Println("Error while connecting to the second database. Err=" + err.Error())
 		os.Exit(0)
 	}
 	defer db2.Close()
@@ -94,22 +157,11 @@ func main() {
 	}
 	rows.Close()
 
+	var c = make(chan bool)
 	for i := 0; i < len(json_config.FieldToCompare); i++ {
-		if json_config.FieldToCompare[i].Field1 != "" {
-			var lastPoint = strings.LastIndex(json_config.FieldToCompare[i].Field1, ".")
-			if lastPoint > 0 {
-				var tablename = json_config.FieldToCompare[i].Field1[0:lastPoint]
-				fmt.Println("tablename=" + tablename)
-				var query = "select " + json_config.FieldToCompare[i].Field1 + ", count(*) from " + tablename + " group by " + json_config.FieldToCompare[i].Field1 + " order by " + json_config.FieldToCompare[i].Field1
-				fmt.Println(query)
-				rows, err := db1.Query(query)
-				if err != nil {
-					fmt.Println("Error while executing request: " + query)
-					os.Exit(0)
-				}
-				defer rows.Close()
-				fmt.Printf("md5 of result: %x \n", getMD5Result(rows))
-			}
-		}
+		go compareRows(json_config.FieldToCompare[i].Field1, json_config.FieldToCompare[i].Field2, db1, db2, c)
+	}
+	for i := 0; i < len(json_config.FieldToCompare); i++ {
+		<-c
 	}
 }
