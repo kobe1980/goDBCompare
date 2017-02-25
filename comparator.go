@@ -4,9 +4,10 @@ package main
 import (
 	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +16,42 @@ import (
 )
 
 const configFile = "config.json"
+const debuglevel = "INFO"
+
+var logger = log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lshortfile)
+
+func logMsg(level string, message string) {
+	switch level {
+	case "ERROR":
+		{
+			if debuglevel == "INFO" || debuglevel == "DEBUG" || debuglevel == "WARNING" || debuglevel == "ERROR" {
+				logger.Println("ERROR: " + message)
+			}
+		}
+	case "WARNING":
+		{
+			if debuglevel == "INFO" || debuglevel == "DEBUG" || debuglevel == "WARNING" {
+				logger.Println("DEBUG: " + message)
+			}
+		}
+	case "DEBUG":
+		{
+			if debuglevel == "INFO" || debuglevel == "DEBUG" {
+				logger.Println("DEBUG: " + message)
+			}
+		}
+	case "INFO":
+		{
+			if debuglevel == "INFO" {
+				logger.Println("INFO: " + message)
+			}
+		}
+	default:
+		{
+
+		}
+	}
+}
 
 func getMD5Result(r *sql.Rows) [16]byte {
 	var result = ""
@@ -32,17 +69,18 @@ func getMD5FromRequest(field string, db *sql.DB) (res [16]byte, error bool) {
 	var lastPoint = strings.LastIndex(field, ".")
 	if lastPoint > 0 {
 		var tablename = field[0:lastPoint]
-		fmt.Println("tablename=" + tablename)
+		logMsg("INFO", "tablename="+tablename)
 		var query = "select " + field + ", count(*) from " + tablename + " group by " + field + " order by " + field
-		fmt.Println("Exec request: " + query)
+		logMsg("INFO", "Exec request: "+query)
 		rows, err := db.Query(query)
 		if err != nil {
-			fmt.Println("Error while executing request: " + query)
+			logMsg("ERROR", "Error while executing request: "+query)
 			return md5Field, true
 		}
 		defer rows.Close()
 		md5Field = getMD5Result(rows)
-		fmt.Printf("md5 of result: %x \n", md5Field)
+		MD5String := hex.EncodeToString(md5Field[:])
+		logMsg("INFO", "md5 of result: "+MD5String)
 		return md5Field, false
 	} else {
 		return md5Field, true
@@ -70,9 +108,9 @@ func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan 
 	}
 
 	if md5Field1 == md5Field2 {
-		fmt.Println(field1 + " correctly exported. No difference detected")
+		logMsg("ERROR", field1+" correctly exported. No difference detected")
 	} else {
-		fmt.Println(field1 + " uncorrectly exported. Differences detected")
+		logMsg("ERROR", field1+" uncorrectly exported. Differences detected")
 	}
 	c <- true
 }
@@ -80,26 +118,25 @@ func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan 
 func createDBConnection(drivername string, user string, password string, databasename string, host string, portnumber string) (*sql.DB, error) {
 	db, err := sql.Open(drivername, "user="+user+" password="+password+" dbname="+databasename+" host="+host+" port="+portnumber)
 	if err != nil {
-		fmt.Println("Error while validating arguments of the connection to the first database. Err=" + err.Error())
+		logMsg("ERROR", "Error while validating arguments of the connection to the first database. Err="+err.Error())
 		return nil, err
 	}
 	// Open may just validate its arguments without creating a connection to the database. To verify that the data source name is valid, call Ping
 	err = db.Ping()
 	if err != nil {
-		fmt.Println("Error while testing connection to the first database. Err=" + err.Error())
+		logMsg("ERROR", "Error while testing connection to the first database. Err="+err.Error())
 		return nil, err
 	}
 	return db, err
 }
 
 func main() {
-	fmt.Println("Hello World!")
-	fmt.Println("Config file = " + configFile)
+	logMsg("INFO", "Config file = "+configFile)
 	r, e := ioutil.ReadFile(configFile)
 	if e != nil {
-		fmt.Println("Impossible de lire le fichier de configuration. Err:" + e.Error())
+		logMsg("ERROR", "Impossible de lire le fichier de configuration. Err:"+e.Error())
 	} else {
-		fmt.Printf("Config = %s\n", r)
+		logMsg("INFO", "Config = "+string(r[:]))
 	}
 
 	type database_config struct {
@@ -124,9 +161,8 @@ func main() {
 	var json_config json_config_file
 	err := json.Unmarshal(r, &json_config)
 	if err != nil {
-		fmt.Println("Error while unmarshalling json config file:", err)
+		logMsg("INFO", "Error while unmarshalling json config file:"+err.Error())
 	}
-	fmt.Printf("%+v\n", json_config)
 
 	// Open connexion to DB 1
 	portNumber := strconv.Itoa(json_config.Databases[0].Port)
@@ -146,14 +182,14 @@ func main() {
 
 	rows, err := db1.Query("select count(*) from Person.Person")
 	if err != nil {
-		fmt.Println("Error while executing request: select count(*) from Person.Person")
+		logMsg("INFO", "Error while executing request: select count(*) from Person.Person")
 		os.Exit(0)
 	}
 
 	for rows.Next() {
 		var count int
 		err = rows.Scan(&count)
-		fmt.Println("Results: ", count)
+		logMsg("INFO", "Results: "+strconv.Itoa(count))
 	}
 	rows.Close()
 
