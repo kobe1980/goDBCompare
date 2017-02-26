@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	_ "github.com/lib/pq"
+	"github.com/satori/go.uuid"
 )
 
 const configFile = "config.json"
@@ -64,30 +65,30 @@ func getMD5Result(r *sql.Rows) [16]byte {
 	return md5.Sum([]byte(result))
 }
 
-func getMD5FromRequest(field string, db *sql.DB) (res [16]byte, error bool) {
+func getMD5FromRequest(field string, db *sql.DB, uid string) (res [16]byte, error bool) {
 	var md5Field [16]byte
 	var lastPoint = strings.LastIndex(field, ".")
 	if lastPoint > 0 {
 		var tablename = field[0:lastPoint]
-		logMsg("INFO", "tablename="+tablename)
+		logMsg("INFO", "UUID: "+uid+" tablename="+tablename)
 		var query = "select " + field + ", count(*) from " + tablename + " group by " + field + " order by " + field
-		logMsg("INFO", "Exec request: "+query)
+		logMsg("INFO", "UUID: "+uid+" Exec request: "+query)
 		rows, err := db.Query(query)
 		if err != nil {
-			logMsg("ERROR", "Error while executing request: "+query)
+			logMsg("ERROR", "UUID: "+uid+" Error while executing request: "+query)
 			return md5Field, true
 		}
 		defer rows.Close()
 		md5Field = getMD5Result(rows)
 		MD5String := hex.EncodeToString(md5Field[:])
-		logMsg("INFO", "md5 of result: "+MD5String)
+		logMsg("INFO", "UUID: "+uid+" md5 of result: "+MD5String)
 		return md5Field, false
 	} else {
 		return md5Field, true
 	}
 }
 
-func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan bool) {
+func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan bool, uid string) {
 	var md5Field1 [16]byte
 	var md5Field2 [16]byte
 	if field1 == "" || field2 == "" {
@@ -95,12 +96,12 @@ func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan 
 		return
 	} else {
 		var error bool
-		md5Field1, error = getMD5FromRequest(field1, db1)
+		md5Field1, error = getMD5FromRequest(field1, db1, uid)
 		if error {
 			c <- false
 			return
 		}
-		md5Field2, error = getMD5FromRequest(field2, db2)
+		md5Field2, error = getMD5FromRequest(field2, db2, uid)
 		if error {
 			c <- false
 			return
@@ -108,9 +109,9 @@ func compareRows(field1 string, field2 string, db1 *sql.DB, db2 *sql.DB, c chan 
 	}
 
 	if md5Field1 == md5Field2 {
-		logMsg("ERROR", field1+" correctly exported. No difference detected")
+		logMsg("ERROR", "UUID: "+uid+" "+field1+" uncorrectly exported. Differences detected")
 	} else {
-		logMsg("ERROR", field1+" uncorrectly exported. Differences detected")
+		logMsg("ERROR", "UUID: "+uid+" "+field1+" correctly exported. No Difference detected")
 	}
 	c <- true
 }
@@ -195,7 +196,8 @@ func main() {
 
 	var c = make(chan bool)
 	for i := 0; i < len(json_config.FieldToCompare); i++ {
-		go compareRows(json_config.FieldToCompare[i].Field1, json_config.FieldToCompare[i].Field2, db1, db2, c)
+		routineuuid := uuid.NewV4().String()
+		go compareRows(json_config.FieldToCompare[i].Field1, json_config.FieldToCompare[i].Field2, db1, db2, c, routineuuid)
 	}
 	for i := 0; i < len(json_config.FieldToCompare); i++ {
 		<-c
